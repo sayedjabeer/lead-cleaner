@@ -1,67 +1,32 @@
-import streamlit as st
 import pandas as pd
-import io
+import numpy as np
 
-st.set_page_config(page_title="FortuneMarq Market Intelligence", page_icon="📊", layout="wide")
-st.title("FortuneMarq Bulk Market Reporter")
-st.markdown("Upload multiple Keyword Planner CSVs to generate a comparative market analysis.")
+# 1. Load the dataset
+df = pd.read_csv('Hubli_Car_Rental_Keywords.csv')
 
-# 1. Bulk File Uploader
-uploaded_files = st.file_uploader("Upload all niche CSV files", type=["csv"], accept_multiple_files=True)
-
-if uploaded_files:
-    report_data = []
-
-    for file in uploaded_files:
+# 2. Clean percentage columns (remove '%' and convert to float)
+def clean_pct(val):
+    if isinstance(val, str):
+        val = val.replace('%', '').replace('∞', '0')
         try:
-            # Handle Google's TSV/UTF-16 format
-            try:
-                df = pd.read_csv(file, sep='\t', encoding='utf-16', skiprows=2)
-            except:
-                file.seek(0)
-                df = pd.read_csv(file, sep='\t', skiprows=2)
+            return float(val) / 100
+        except ValueError:
+            return 0.0
+    return 0.0
 
-            df.columns = df.columns.str.strip()
-            
-            # Clean and filter for Commercial Intent
-            df['Avg. monthly searches'] = pd.to_numeric(df['Avg. monthly searches'], errors='coerce').fillna(0)
-            df['Top of page bid (high range)'] = pd.to_numeric(df['Top of page bid (high range)'], errors='coerce').fillna(0)
-            
-            commercial_terms = ['near me', 'cost', 'price', 'clinic', 'specialist', 'treatment', 'implant', 'best', 'dentist']
-            df_commercial = df[
-                (df['Top of page bid (high range)'] > 0) | 
-                (df['Keyword'].str.contains('|'.join(commercial_terms), case=False, na=False))
-            ]
+df['Three month change'] = df['Three month change'].apply(clean_pct)
+df['YoY change'] = df['YoY change'].apply(clean_pct)
 
-            # 2. Extract niche name from filename
-            niche_name = file.name.replace(".csv", "").replace("_", " ")
+# 3. Handle missing values
+# Fill missing bids with 0 and indexed competition with the median or 0
+df['Top of page bid (low range)'] = df['Top of page bid (low range)'].fillna(0)
+df['Competition (indexed value)'] = df['Competition (indexed value)'].fillna(0)
 
-            # 3. Calculate Intelligence Metrics
-            report_data.append({
-                "Niche/Market": niche_name,
-                "Total Keywords": len(df_commercial),
-                "Total Monthly Searches": df_commercial['Avg. monthly searches'].sum(),
-                "Avg. CPC (Market Value)": df_commercial[df_commercial['Top of page bid (high range)'] > 0]['Top of page bid (high range)'].mean(),
-                "Top Keyword": df_commercial.sort_values(by='Avg. monthly searches', ascending=False).iloc[0]['Keyword'] if not df_commercial.empty else "N/A"
-            })
+# 4. Remove columns that are entirely empty (like Ad/Organic impression shares)
+df_cleaned = df.dropna(axis=1, how='all')
 
-        except Exception as e:
-            st.error(f"Could not process {file.name}: {e}")
+# Save the cleaned version for the next steps
+df_cleaned.to_csv('Cleaned_Hubli_Keywords.csv', index=False)
 
-    # 4. Generate the Master Report Table
-    if report_data:
-        master_df = pd.DataFrame(report_data)
-        master_df = master_df.sort_values(by="Total Monthly Searches", ascending=False)
-
-        st.write("### 📈 Master Comparative Report")
-        st.dataframe(master_df, use_container_width=True)
-
-        # 5. Export Master Report
-        output = io.StringIO()
-        master_df.to_csv(output, index=False)
-        st.download_button(
-            label="📥 Download Master Market Report",
-            data=output.getvalue(),
-            file_name="FortuneMarq_Market_Intelligence_Report.csv",
-            mime="text/csv"
-        )
+print("Data cleaning complete. Column 'Three month change' and 'YoY change' are now numeric.")
+print(df_cleaned[['Keyword', 'Avg. monthly searches', 'Three month change']].head())
